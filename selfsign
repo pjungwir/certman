@@ -1,0 +1,81 @@
+#!/usr/bin/env ruby
+
+# selfsign - Generates an SSL key and self-signed cert
+#            for a wildcard domain *plus* the bare domain.
+#
+# USAGE
+#
+#     selfsign example.test
+#
+# will generate example.test.key and STAR.example.test.crt
+
+require 'tmpdir'
+
+fqdn = ARGV[0]
+
+Dir.mktmpdir("selfsign") do |dir|
+  Dir.chdir(dir) do
+    system('openssl', 'genrsa', '-out', "./#{fqdn}.key", '2048') or raise 'openssl genrsa failed'
+    File.open("openssl.cnf", 'w') do |f|
+      f.write <<-EOF
+HOME			= .
+RANDFILE		= $ENV::HOME/.rnd
+
+[ req ]
+
+default_bits		= 2048
+distinguished_name	= req_distinguished_name
+attributes		= req_attributes
+x509_extensions	= v3_req	# The extentions to add to the self signed cert
+
+# This sets a mask for permitted string types. There are several options. 
+# default: PrintableString, T61String, BMPString.
+# pkix	 : PrintableString, BMPString (PKIX recommendation before 2004)
+# utf8only: only UTF8Strings (PKIX recommendation after 2004).
+# nombstr : PrintableString, T61String (no BMPStrings or UTF8Strings).
+# MASK:XXXX a literal mask value.
+# WARNING: ancient versions of Netscape crash on BMPStrings or UTF8Strings.
+string_mask = utf8only
+
+[req_distinguished_name]
+
+countryName			= Country Name (2 letter code)
+countryName_min			= 2
+countryName_max			= 2
+stateOrProvinceName		= State or Province Name (full name)
+localityName			= Locality Name (eg, city)
+0.organizationName		= Organization Name (eg, company)
+organizationalUnitName		= Organizational Unit Name (eg, section)
+commonName			= Common Name (eg, fully qualified host name)
+commonName_default = *.#{fqdn}
+commonName_max			= 64
+
+[ req_attributes ]
+
+challengePassword		= A challenge password
+challengePassword_min		= 4
+challengePassword_max		= 20
+
+unstructuredName		= An optional company name
+
+[ v3_req ]
+
+# Extensions to add to a certificate request
+
+basicConstraints = CA:FALSE
+keyUsage = nonRepudiation, digitalSignature, keyEncipherment
+
+subjectAltName = @alt_names
+
+[ alt_names ]
+
+DNS.1 = *.#{fqdn}
+DNS.2 = #{fqdn}
+      EOF
+    end # File.open("openssl.cnf")
+
+    system('openssl', 'req', '-new', '-x509', '-key', "./#{fqdn}.key", '-sha256', '-config', 'openssl.cnf', '-days', '3000', '-out', "STAR.#{fqdn}.crt") or raise 'openssl req failed'
+  end # chdir
+
+  system('cp', '-a', "#{dir}/#{fqdn}.key", "#{dir}/STAR.#{fqdn}.crt", '.') or raise 'cp failed'
+end # mktmpdir
